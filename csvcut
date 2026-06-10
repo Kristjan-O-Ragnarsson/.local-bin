@@ -1,0 +1,34 @@
+#!/usr/bin/env python3
+import argparse
+import csv
+from operator import itemgetter
+
+def int_list(value):
+    return [int(x) for x in value.split(",")]
+
+
+parser = argparse.ArgumentParser(
+	prog='csvcut'#,
+    #description="%(prog) - cut out a selected field of each line in a csv file"
+)
+
+parser.add_argument("-f", dest="field", type=int, help='The index of the %(dest)s to be returned.')
+parser.add_argument("-d", dest="delimiter", default=',', type=str, help='Use %(dest)s as the field delimiter character (default: %(default)s)')
+#parser.add_argument("-q", dest="quotechar")
+
+parser.add_argument("filename")
+
+args = parser.parse_args()
+
+print(args.filename, args.field, args.delimiter)
+with open(args.filename, newline='') as csvfile:
+    read = csv.reader(csvfile, delimiter=args.delimiter)
+    for row in read:
+        if args.field is None:
+            print(*row)
+        else:
+             #print(*itemgetter(args.field)(row))#            
+             print(row[args.field - 1])
+
+
+
