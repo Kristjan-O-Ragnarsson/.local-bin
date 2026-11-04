@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+usage() {
+    echo "Usage: $0 -h <hostname> -i <inventory> -r <role>"
+    echo "  -h  Target host or group (e.g., webserver1 or webservers)"
+    echo "  -i  Path to inventory file (e.g., hosts.ini)"
+    echo "  -r  Role name to execute (e.g., nginx)"
+    exit 1
+}
+
+ANSIBLE_BIN=$(command -v ansible) || {
+    echo "Error: ansible is not installed or in path" >&2
+    exit 1
+}
+
+HOST=""
+INVENTORY=""
+ROLE=""
+
+while getopts "h:i:r:" opt; do
+    case "$opt" in
+        h) HOST="$OPTARG" ;;
+        i) INVENTORY="$OPTARG" ;;
+        r) ROLE="$OPTARG" ;;
+        *) usage ;;
+    esac
+done
+
+if [[ -z "$HOST" || -z "$INVENTORY" || -z "$ROLE" ]]; then
+    echo "Error: Missing required arguments." >&2
+    usage
+fi
+
+if [[ ! -f "$INVENTORY" ]]; then
+    echo "Error: Inventory file '$INVENTORY' not found." >&2
+    exit 1
+fi
+
+echo "Checking '$ROLE' diff on '$HOST'"
+"$ANSIBLE_BIN" "$HOST" -i "$INVENTORY" -m ansible.builtin.include_role -a "name=$ROLE" --check --diff
