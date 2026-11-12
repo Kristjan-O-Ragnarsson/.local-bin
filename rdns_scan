@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+#
+# rdns_scan.sh - Reverse-DNS lookup (dig +short -x) for every address in an IPv4 network.
+#
+# Usage:
+#   rdns_scan.sh <network> <prefix>       e.g.  rdns_scan.sh 10.20.16.0 /21
+#   rdns_scan.sh <network>/<prefix>       e.g.  rdns_scan.sh 10.20.16.0/21
+#
+# Options:
+#   -a        Print every address, including those with no PTR record
+#   -s IP     Use a specific DNS server (passed to dig as @IP)
+#   -h        Show this help
+#
+# Output: "<ip>  <ptr>" per line (multiple PTRs are comma-separated).
+
+set -euo pipefail
+
+usage() { sed -n '3,15p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+
+show_all=0
+server=""
+while getopts ":as:h" opt; do
+    case "$opt" in
+        a) show_all=1 ;;
+        s) server="@$OPTARG" ;;
+        h) usage 0 ;;
+        *) usage 1 ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+command -v dig >/dev/null 2>&1 || { echo "Error: dig not found (install bind-utils / dnsutils)." >&2; exit 1; }
+
+# Accept "net/prefix" or "net prefix" (prefix with or without leading slash)
+case $# in
+    1) net="${1%/*}"; prefix="${1#*/}"; [[ "$1" == */* ]] || usage 1 ;;
+    2) net="$1"; prefix="${2#/}" ;;
+    *) usage 1 ;;
+esac
+
+# Validate prefix
+[[ "$prefix" =~ ^[0-9]+$ ]] && (( prefix >= 0 && prefix <= 32 )) \
+    || { echo "Error: invalid prefix '$prefix' (must be 0-32)." >&2; exit 1; }
+
+# Validate and convert dotted quad to integer
+ip2int() {
+    local IFS=. a b c d
+    read -r a b c d <<< "$1"
+    for o in "$a" "$b" "$c" "$d"; do
+        [[ "$o" =~ ^[0-9]+$ ]] && (( o <= 255 )) || return 1
+    done
+    echo $(( (a << 24) | (b << 16) | (c << 8) | d ))
+}
+int2ip() {
+    local n=$1
+    echo "$(( (n >> 24) & 255 )).$(( (n >> 16) & 255 )).$(( (n >> 8) & 255 )).$(( n & 255 ))"
+}
+
+ipint=$(ip2int "$net") || { echo "Error: invalid IPv4 address '$net'." >&2; exit 1; }
+
+mask=$(( prefix == 0 ? 0 : (0xFFFFFFFF << (32 - prefix)) & 0xFFFFFFFF ))
+first=$(( ipint & mask ))
+last=$(( first | (~mask & 0xFFFFFFFF) ))
+
+if (( first != ipint )); then
+    echo "Note: $net is not the network address; using $(int2ip "$first")/$prefix." >&2
+fi
+echo "Scanning $(int2ip "$first") - $(int2ip "$last") ($(( last - first + 1 )) addresses)" >&2
+
+for (( i = first; i <= last; i++ )); do
+    ip=$(int2ip "$i")
+    # shellcheck disable=SC2086
+    ptr=$(dig $server +short +time=2 +tries=1 -x "$ip" 2>/dev/null | grep -v '^;' | paste -sd, - || true)
+    if [[ -n "$ptr" ]]; then
+        printf '%-15s  %s\n' "$ip" "$ptr"
+    elif (( show_all )); then
+        printf '%-15s  %s\n' "$ip" "-"
+    fi
+done
